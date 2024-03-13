@@ -236,16 +236,16 @@ function reorderOnIdList(order, list) {
   return copy;
 }
 async function runAllProviders(list, ops) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n;
-  const sources = reorderOnIdList(ops.sourceOrder ?? [], list.sources).filter((source) => {
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q;
+  const sources = reorderOnIdList(ops.sourceOrder ?? [], list.sources).filter((v) => {
     if (ops.media.type === "movie")
-      return !!source.scrapeMovie;
+      return !!v.scrapeMovie;
     if (ops.media.type === "show")
-      return !!source.scrapeShow;
+      return !!v.scrapeShow;
     return false;
   });
   const embeds = reorderOnIdList(ops.embedOrder ?? [], list.embeds);
-  const embedIds = embeds.map((embed) => embed.id);
+  const embedIds = embeds.map((v) => v.id);
   let lastId = "";
   const contextBase = {
     fetcher: ops.fetcher,
@@ -262,89 +262,108 @@ async function runAllProviders(list, ops) {
   (_b = (_a = ops.events) == null ? void 0 : _a.init) == null ? void 0 : _b.call(_a, {
     sourceIds: sources.map((v) => v.id)
   });
-  for (const source of sources) {
-    (_d = (_c = ops.events) == null ? void 0 : _c.start) == null ? void 0 : _d.call(_c, source.id);
-    lastId = source.id;
+  for (const s of sources) {
+    (_d = (_c = ops.events) == null ? void 0 : _c.start) == null ? void 0 : _d.call(_c, s.id);
+    lastId = s.id;
     let output = null;
     try {
-      if (ops.media.type === "movie" && source.scrapeMovie)
-        output = await source.scrapeMovie({
+      if (ops.media.type === "movie" && s.scrapeMovie)
+        output = await s.scrapeMovie({
           ...contextBase,
           media: ops.media
         });
-      else if (ops.media.type === "show" && source.scrapeShow)
-        output = await source.scrapeShow({
+      else if (ops.media.type === "show" && s.scrapeShow)
+        output = await s.scrapeShow({
           ...contextBase,
           media: ops.media
         });
       if (output) {
-        output.stream = (output.stream ?? []).filter(isValidStream$1).filter((stream) => flagsAllowedInFeatures(ops.features, stream.flags));
+        output.stream = (output.stream ?? []).filter((stream) => isValidStream$1(stream)).filter((stream) => flagsAllowedInFeatures(ops.features, stream.flags));
       }
-      if (!output || !((_e = output.stream) == null ? void 0 : _e.length) && !output.embeds.length) {
+      if (!output)
+        throw Error("No output");
+      if ((!output.stream || output.stream.length === 0) && output.embeds.length === 0)
         throw new NotFoundError("No streams found");
+    } catch (err) {
+      if (err instanceof NotFoundError) {
+        (_f = (_e = ops.events) == null ? void 0 : _e.update) == null ? void 0 : _f.call(_e, {
+          id: s.id,
+          percentage: 100,
+          status: "notfound",
+          reason: err.message
+        });
+        continue;
       }
-    } catch (error) {
-      const updateParams = {
-        id: source.id,
+      (_h = (_g = ops.events) == null ? void 0 : _g.update) == null ? void 0 : _h.call(_g, {
+        id: s.id,
         percentage: 100,
-        status: error instanceof NotFoundError ? "notfound" : "failure",
-        reason: error instanceof NotFoundError ? error.message : void 0,
-        error: error instanceof NotFoundError ? void 0 : error
-      };
-      (_g = (_f = ops.events) == null ? void 0 : _f.update) == null ? void 0 : _g.call(_f, updateParams);
+        status: "failure",
+        error: err
+      });
       continue;
     }
     if (!output)
       throw new Error("Invalid media type");
-    if ((_h = output.stream) == null ? void 0 : _h[0]) {
+    if ((_i = output.stream) == null ? void 0 : _i[0]) {
       return {
-        sourceId: source.id,
+        sourceId: s.id,
         stream: output.stream[0]
       };
     }
     const sortedEmbeds = output.embeds.filter((embed) => {
       const e = list.embeds.find((v) => v.id === embed.embedId);
-      return e && !e.disabled;
+      if (!e || e.disabled)
+        return false;
+      return true;
     }).sort((a, b) => embedIds.indexOf(a.embedId) - embedIds.indexOf(b.embedId));
     if (sortedEmbeds.length > 0) {
-      (_j = (_i = ops.events) == null ? void 0 : _i.discoverEmbeds) == null ? void 0 : _j.call(_i, {
-        embeds: sortedEmbeds.map((embed, i) => ({
-          id: [source.id, i].join("-"),
-          embedScraperId: embed.embedId
+      (_k = (_j = ops.events) == null ? void 0 : _j.discoverEmbeds) == null ? void 0 : _k.call(_j, {
+        embeds: sortedEmbeds.map((v, i) => ({
+          id: [s.id, i].join("-"),
+          embedScraperId: v.embedId
         })),
-        sourceId: source.id
+        sourceId: s.id
       });
     }
-    for (const [ind, embed] of sortedEmbeds.entries()) {
-      const scraper = embeds.find((v) => v.id === embed.embedId);
+    for (const ind in sortedEmbeds) {
+      if (!Object.prototype.hasOwnProperty.call(sortedEmbeds, ind))
+        continue;
+      const e = sortedEmbeds[ind];
+      const scraper = embeds.find((v) => v.id === e.embedId);
       if (!scraper)
         throw new Error("Invalid embed returned");
-      const id = [source.id, ind].join("-");
-      (_l = (_k = ops.events) == null ? void 0 : _k.start) == null ? void 0 : _l.call(_k, id);
+      const id = [s.id, ind].join("-");
+      (_m = (_l = ops.events) == null ? void 0 : _l.start) == null ? void 0 : _m.call(_l, id);
       lastId = id;
       let embedOutput;
       try {
         embedOutput = await scraper.scrape({
           ...contextBase,
-          url: embed.url
+          url: e.url
         });
-        embedOutput.stream = embedOutput.stream.filter(isValidStream$1).filter((stream) => flagsAllowedInFeatures(ops.features, stream.flags));
-        if (embedOutput.stream.length === 0) {
+        embedOutput.stream = embedOutput.stream.filter((stream) => isValidStream$1(stream)).filter((stream) => flagsAllowedInFeatures(ops.features, stream.flags));
+        if (embedOutput.stream.length === 0)
           throw new NotFoundError("No streams found");
+      } catch (err) {
+        if (err instanceof NotFoundError) {
+          (_o = (_n = ops.events) == null ? void 0 : _n.update) == null ? void 0 : _o.call(_n, {
+            id,
+            percentage: 100,
+            status: "notfound",
+            reason: err.message
+          });
+          continue;
         }
-      } catch (error) {
-        const updateParams = {
-          id: source.id,
+        (_q = (_p = ops.events) == null ? void 0 : _p.update) == null ? void 0 : _q.call(_p, {
+          id,
           percentage: 100,
-          status: error instanceof NotFoundError ? "notfound" : "failure",
-          reason: error instanceof NotFoundError ? error.message : void 0,
-          error: error instanceof NotFoundError ? void 0 : error
-        };
-        (_n = (_m = ops.events) == null ? void 0 : _m.update) == null ? void 0 : _n.call(_m, updateParams);
+          status: "failure",
+          error: err
+        });
         continue;
       }
       return {
-        sourceId: source.id,
+        sourceId: s.id,
         embedId: scraper.id,
         stream: embedOutput.stream[0]
       };
@@ -436,8 +455,6 @@ const doodScraper = makeEmbed({
       baseUrl: baseUrl3
     });
     const downloadURL = `${doodPage}${nanoid()}?token=${dataForLater}&expiry=${Date.now()}`;
-    if (!downloadURL.startsWith("http"))
-      throw new Error("Invalid URL");
     return {
       stream: [
         {
@@ -494,7 +511,7 @@ async function getFileList(ctx, shareKey, parentId) {
 function isValidStream(file) {
   return file.ext === "mp4" || file.ext === "mkv";
 }
-async function getStreams$1(ctx, shareKey, type, season, episode) {
+async function getStreams(ctx, shareKey, type, season, episode) {
   const streams = await getFileList(ctx, shareKey);
   if (type === "show") {
     const seasonFolder = streams.find((v) => {
@@ -678,7 +695,7 @@ const febboxHlsScraper = makeEmbed({
       throw new Error("No embed url found");
     ctx.progress(30);
     const shareKey = extractShareKey(sharelinkResult.data.link);
-    const fileList = await getStreams$1(ctx, shareKey, type, season, episode);
+    const fileList = await getStreams(ctx, shareKey, type, season, episode);
     const firstStream = fileList[0];
     if (!firstStream)
       throw new Error("No playable mp4 stream found");
@@ -771,20 +788,20 @@ const febboxMp4Scraper = makeEmbed({
     };
   }
 });
-const packedRegex$2 = /(eval\(function\(p,a,c,k,e,d\){.*{}\)\))/;
-const linkRegex$4 = /MDCore\.wurl="(.*?)";/;
+const packedRegex$1 = /(eval\(function\(p,a,c,k,e,d\){.*{}\)\))/;
+const linkRegex$2 = /MDCore\.wurl="(.*?)";/;
 const mixdropScraper = makeEmbed({
   id: "mixdrop",
   name: "MixDrop",
   rank: 198,
   async scrape(ctx) {
     const streamRes = await ctx.proxiedFetcher(ctx.url);
-    const packed = streamRes.match(packedRegex$2);
+    const packed = streamRes.match(packedRegex$1);
     if (!packed) {
       throw new Error("failed to find packed mixdrop JavaScript");
     }
     const unpacked = unpacker.unpack(packed[1]);
-    const link = unpacked.match(linkRegex$4);
+    const link = unpacked.match(linkRegex$2);
     if (!link) {
       throw new Error("failed to find packed mixdrop source link");
     }
@@ -842,7 +859,7 @@ const mp4uploadScraper = makeEmbed({
   }
 });
 const hunterRegex = /eval\(function\(h,u,n,t,e,r\).*?\("(.*?)",\d*?,"(.*?)",(\d*?),(\d*?),\d*?\)\)/;
-const linkRegex$3 = /file:"(.*?)"/;
+const linkRegex$1 = /file:"(.*?)"/;
 function decodeHunter(encoded, mask, charCodeOffset, delimiterOffset) {
   const delimiter = mask[delimiterOffset];
   const chunks = encoded.split(delimiter).filter((chunk) => chunk);
@@ -881,7 +898,7 @@ const streambucketScraper = makeEmbed({
       throw new Error("StreamBucket hunter JavaScript delimiterOffset is not a valid number");
     }
     const decoded = decodeHunter(encoded, mask, charCodeOffset, delimiterOffset);
-    regexResult = decoded.match(linkRegex$3);
+    regexResult = decoded.match(linkRegex$1);
     if (!regexResult) {
       throw new Error("Failed to find StreamBucket HLS link");
     }
@@ -917,11 +934,11 @@ function getAugmentedNamespace(n) {
   } else
     a = {};
   Object.defineProperty(a, "__esModule", { value: true });
-  Object.keys(n).forEach(function(k) {
+  Object.keys(n).forEach(function (k) {
     var d = Object.getOwnPropertyDescriptor(n, k);
     Object.defineProperty(a, k, d.get ? d : {
       enumerable: true,
-      get: function() {
+      get: function () {
         return n[k];
       }
     });
@@ -944,13 +961,13 @@ function requireCore() {
   if (hasRequiredCore)
     return core.exports;
   hasRequiredCore = 1;
-  (function(module, exports) {
-    (function(root, factory) {
+  (function (module, exports) {
+    (function (root, factory) {
       {
         module.exports = factory();
       }
-    })(commonjsGlobal, function() {
-      var CryptoJS2 = CryptoJS2 || function(Math2, undefined$1) {
+    })(commonjsGlobal, function () {
+      var CryptoJS2 = CryptoJS2 || function (Math2, undefined$1) {
         var crypto;
         if (typeof window !== "undefined" && window.crypto) {
           crypto = window.crypto;
@@ -973,7 +990,7 @@ function requireCore() {
           } catch (err) {
           }
         }
-        var cryptoSecureRandomInt = function() {
+        var cryptoSecureRandomInt = function () {
           if (crypto) {
             if (typeof crypto.getRandomValues === "function") {
               try {
@@ -990,10 +1007,10 @@ function requireCore() {
           }
           throw new Error("Native crypto module could not be used to get secure random number.");
         };
-        var create = Object.create || function() {
+        var create = Object.create || function () {
           function F() {
           }
-          return function(obj) {
+          return function (obj) {
             var subtype;
             F.prototype = obj;
             subtype = new F();
@@ -1003,7 +1020,7 @@ function requireCore() {
         }();
         var C = {};
         var C_lib = C.lib = {};
-        var Base = C_lib.Base = function() {
+        var Base = C_lib.Base = function () {
           return {
             /**
              * Creates a new object that inherits from this object.
@@ -1023,13 +1040,13 @@ function requireCore() {
              *         }
              *     });
              */
-            extend: function(overrides) {
+            extend: function (overrides) {
               var subtype = create(this);
               if (overrides) {
                 subtype.mixIn(overrides);
               }
               if (!subtype.hasOwnProperty("init") || this.init === subtype.init) {
-                subtype.init = function() {
+                subtype.init = function () {
                   subtype.$super.init.apply(this, arguments);
                 };
               }
@@ -1049,7 +1066,7 @@ function requireCore() {
              *
              *     var instance = MyType.create();
              */
-            create: function() {
+            create: function () {
               var instance = this.extend();
               instance.init.apply(instance, arguments);
               return instance;
@@ -1066,7 +1083,7 @@ function requireCore() {
              *         }
              *     });
              */
-            init: function() {
+            init: function () {
             },
             /**
              * Copies properties into this object.
@@ -1079,7 +1096,7 @@ function requireCore() {
              *         field: 'value'
              *     });
              */
-            mixIn: function(properties) {
+            mixIn: function (properties) {
               for (var propertyName in properties) {
                 if (properties.hasOwnProperty(propertyName)) {
                   this[propertyName] = properties[propertyName];
@@ -1098,7 +1115,7 @@ function requireCore() {
              *
              *     var clone = instance.clone();
              */
-            clone: function() {
+            clone: function () {
               return this.init.prototype.extend(this);
             }
           };
@@ -1116,7 +1133,7 @@ function requireCore() {
            *     var wordArray = CryptoJS.lib.WordArray.create([0x00010203, 0x04050607]);
            *     var wordArray = CryptoJS.lib.WordArray.create([0x00010203, 0x04050607], 6);
            */
-          init: function(words, sigBytes) {
+          init: function (words, sigBytes) {
             words = this.words = words || [];
             if (sigBytes != undefined$1) {
               this.sigBytes = sigBytes;
@@ -1137,7 +1154,7 @@ function requireCore() {
            *     var string = wordArray.toString();
            *     var string = wordArray.toString(CryptoJS.enc.Utf8);
            */
-          toString: function(encoder) {
+          toString: function (encoder) {
             return (encoder || Hex).stringify(this);
           },
           /**
@@ -1151,7 +1168,7 @@ function requireCore() {
            *
            *     wordArray1.concat(wordArray2);
            */
-          concat: function(wordArray) {
+          concat: function (wordArray) {
             var thisWords = this.words;
             var thatWords = wordArray.words;
             var thisSigBytes = this.sigBytes;
@@ -1177,7 +1194,7 @@ function requireCore() {
            *
            *     wordArray.clamp();
            */
-          clamp: function() {
+          clamp: function () {
             var words = this.words;
             var sigBytes = this.sigBytes;
             words[sigBytes >>> 2] &= 4294967295 << 32 - sigBytes % 4 * 8;
@@ -1192,7 +1209,7 @@ function requireCore() {
            *
            *     var clone = wordArray.clone();
            */
-          clone: function() {
+          clone: function () {
             var clone = Base.clone.call(this);
             clone.words = this.words.slice(0);
             return clone;
@@ -1210,7 +1227,7 @@ function requireCore() {
            *
            *     var wordArray = CryptoJS.lib.WordArray.random(16);
            */
-          random: function(nBytes) {
+          random: function (nBytes) {
             var words = [];
             for (var i = 0; i < nBytes; i += 4) {
               words.push(cryptoSecureRandomInt());
@@ -1233,7 +1250,7 @@ function requireCore() {
            *
            *     var hexString = CryptoJS.enc.Hex.stringify(wordArray);
            */
-          stringify: function(wordArray) {
+          stringify: function (wordArray) {
             var words = wordArray.words;
             var sigBytes = wordArray.sigBytes;
             var hexChars = [];
@@ -1257,7 +1274,7 @@ function requireCore() {
            *
            *     var wordArray = CryptoJS.enc.Hex.parse(hexString);
            */
-          parse: function(hexStr) {
+          parse: function (hexStr) {
             var hexStrLength = hexStr.length;
             var words = [];
             for (var i = 0; i < hexStrLength; i += 2) {
@@ -1280,7 +1297,7 @@ function requireCore() {
            *
            *     var latin1String = CryptoJS.enc.Latin1.stringify(wordArray);
            */
-          stringify: function(wordArray) {
+          stringify: function (wordArray) {
             var words = wordArray.words;
             var sigBytes = wordArray.sigBytes;
             var latin1Chars = [];
@@ -1303,7 +1320,7 @@ function requireCore() {
            *
            *     var wordArray = CryptoJS.enc.Latin1.parse(latin1String);
            */
-          parse: function(latin1Str) {
+          parse: function (latin1Str) {
             var latin1StrLength = latin1Str.length;
             var words = [];
             for (var i = 0; i < latin1StrLength; i++) {
@@ -1326,7 +1343,7 @@ function requireCore() {
            *
            *     var utf8String = CryptoJS.enc.Utf8.stringify(wordArray);
            */
-          stringify: function(wordArray) {
+          stringify: function (wordArray) {
             try {
               return decodeURIComponent(escape(Latin1.stringify(wordArray)));
             } catch (e) {
@@ -1346,7 +1363,7 @@ function requireCore() {
            *
            *     var wordArray = CryptoJS.enc.Utf8.parse(utf8String);
            */
-          parse: function(utf8Str) {
+          parse: function (utf8Str) {
             return Latin1.parse(unescape(encodeURIComponent(utf8Str)));
           }
         };
@@ -1358,7 +1375,7 @@ function requireCore() {
            *
            *     bufferedBlockAlgorithm.reset();
            */
-          reset: function() {
+          reset: function () {
             this._data = new WordArray.init();
             this._nDataBytes = 0;
           },
@@ -1372,7 +1389,7 @@ function requireCore() {
            *     bufferedBlockAlgorithm._append('data');
            *     bufferedBlockAlgorithm._append(wordArray);
            */
-          _append: function(data2) {
+          _append: function (data2) {
             if (typeof data2 == "string") {
               data2 = Utf82.parse(data2);
             }
@@ -1393,7 +1410,7 @@ function requireCore() {
            *     var processedData = bufferedBlockAlgorithm._process();
            *     var processedData = bufferedBlockAlgorithm._process(!!'flush');
            */
-          _process: function(doFlush) {
+          _process: function (doFlush) {
             var processedWords;
             var data2 = this._data;
             var dataWords = data2.words;
@@ -1426,7 +1443,7 @@ function requireCore() {
            *
            *     var clone = bufferedBlockAlgorithm.clone();
            */
-          clone: function() {
+          clone: function () {
             var clone = Base.clone.call(this);
             clone._data = this._data.clone();
             return clone;
@@ -1447,7 +1464,7 @@ function requireCore() {
            *
            *     var hasher = CryptoJS.algo.SHA256.create();
            */
-          init: function(cfg) {
+          init: function (cfg) {
             this.cfg = this.cfg.extend(cfg);
             this.reset();
           },
@@ -1458,7 +1475,7 @@ function requireCore() {
            *
            *     hasher.reset();
            */
-          reset: function() {
+          reset: function () {
             BufferedBlockAlgorithm.reset.call(this);
             this._doReset();
           },
@@ -1474,7 +1491,7 @@ function requireCore() {
            *     hasher.update('message');
            *     hasher.update(wordArray);
            */
-          update: function(messageUpdate) {
+          update: function (messageUpdate) {
             this._append(messageUpdate);
             this._process();
             return this;
@@ -1493,7 +1510,7 @@ function requireCore() {
            *     var hash = hasher.finalize('message');
            *     var hash = hasher.finalize(wordArray);
            */
-          finalize: function(messageUpdate) {
+          finalize: function (messageUpdate) {
             if (messageUpdate) {
               this._append(messageUpdate);
             }
@@ -1514,8 +1531,8 @@ function requireCore() {
            *
            *     var SHA256 = CryptoJS.lib.Hasher._createHelper(CryptoJS.algo.SHA256);
            */
-          _createHelper: function(hasher) {
-            return function(message, cfg) {
+          _createHelper: function (hasher) {
+            return function (message, cfg) {
               return new hasher.init(cfg).finalize(message);
             };
           },
@@ -1532,8 +1549,8 @@ function requireCore() {
            *
            *     var HmacSHA256 = CryptoJS.lib.Hasher._createHmacHelper(CryptoJS.algo.SHA256);
            */
-          _createHmacHelper: function(hasher) {
-            return function(message, key2) {
+          _createHmacHelper: function (hasher) {
+            return function (message, key2) {
               return new C_algo.HMAC.init(hasher, key2).finalize(message);
             };
           }
@@ -1546,13 +1563,13 @@ function requireCore() {
   })(core);
   return core.exports;
 }
-(function(module, exports) {
-  (function(root, factory) {
+(function (module, exports) {
+  (function (root, factory) {
     {
       module.exports = factory(requireCore());
     }
-  })(commonjsGlobal, function(CryptoJS2) {
-    (function() {
+  })(commonjsGlobal, function (CryptoJS2) {
+    (function () {
       var C = CryptoJS2;
       var C_lib = C.lib;
       var WordArray = C_lib.WordArray;
@@ -1571,7 +1588,7 @@ function requireCore() {
          *
          *     var base64String = CryptoJS.enc.Base64.stringify(wordArray);
          */
-        stringify: function(wordArray) {
+        stringify: function (wordArray) {
           var words = wordArray.words;
           var sigBytes = wordArray.sigBytes;
           var map = this._map;
@@ -1607,7 +1624,7 @@ function requireCore() {
          *
          *     var wordArray = CryptoJS.enc.Base64.parse(base64String);
          */
-        parse: function(base64Str) {
+        parse: function (base64Str) {
           var base64StrLength = base64Str.length;
           var map = this._map;
           var reverseMap = this._reverseMap;
@@ -1649,12 +1666,12 @@ function requireCore() {
 var encBase64Exports = encBase64.exports;
 const Base64 = /* @__PURE__ */ getDefaultExportFromCjs(encBase64Exports);
 var encUtf8 = { exports: {} };
-(function(module, exports) {
-  (function(root, factory) {
+(function (module, exports) {
+  (function (root, factory) {
     {
       module.exports = factory(requireCore());
     }
-  })(commonjsGlobal, function(CryptoJS2) {
+  })(commonjsGlobal, function (CryptoJS2) {
     return CryptoJS2.enc.Utf8;
   });
 })(encUtf8);
@@ -1791,34 +1808,6 @@ const streamsbScraper = makeEmbed({
     };
   }
 });
-const packedRegex$1 = /(eval\(function\(p,a,c,k,e,d\).*\)\)\))/;
-const linkRegex$2 = /src:"(https:\/\/[^"]+)"/;
-const streamvidScraper = makeEmbed({
-  id: "streamvid",
-  name: "Streamvid",
-  rank: 215,
-  async scrape(ctx) {
-    const streamRes = await ctx.proxiedFetcher(ctx.url);
-    const packed = streamRes.match(packedRegex$1);
-    if (!packed)
-      throw new Error("streamvid packed not found");
-    const unpacked = unpacker.unpack(packed[1]);
-    const link = unpacked.match(linkRegex$2);
-    if (!link)
-      throw new Error("streamvid link not found");
-    return {
-      stream: [
-        {
-          id: "primary",
-          type: "hls",
-          playlist: link[1],
-          flags: [],
-          captions: []
-        }
-      ]
-    };
-  }
-});
 const origin$1 = "https://rabbitstream.net";
 const referer$6 = "https://rabbitstream.net/";
 const { AES, enc } = CryptoJS;
@@ -1830,27 +1819,7 @@ function isJSON(json) {
     return false;
   }
 }
-function extractKey(script) {
-  const startOfSwitch = script.lastIndexOf("switch");
-  const endOfCases = script.indexOf("partKeyStartPosition");
-  const switchBody = script.slice(startOfSwitch, endOfCases);
-  const nums = [];
-  const matches = switchBody.matchAll(/:[a-zA-Z0-9]+=([a-zA-Z0-9]+),[a-zA-Z0-9]+=([a-zA-Z0-9]+);/g);
-  for (const match of matches) {
-    const innerNumbers = [];
-    for (const varMatch of [match[1], match[2]]) {
-      const regex = new RegExp(`${varMatch}=0x([a-zA-Z0-9]+)`, "g");
-      const varMatches = [...script.matchAll(regex)];
-      const lastMatch = varMatches[varMatches.length - 1];
-      if (!lastMatch)
-        return null;
-      const number = parseInt(lastMatch[1], 16);
-      innerNumbers.push(number);
-    }
-    nums.push([innerNumbers[0], innerNumbers[1]]);
-  }
-  return nums;
-}
+
 const upcloudScraper = makeEmbed({
   id: "upcloud",
   name: "UpCloud",
@@ -1867,30 +1836,15 @@ const upcloudScraper = makeEmbed({
     });
     let sources = null;
     if (!isJSON(streamRes.sources)) {
-      const scriptJs = await ctx.proxiedFetcher(`https://rabbitstream.net/js/player/prod/e4-player.min.js`, {
-        query: {
-          // browser side caching on this endpoint is quite extreme. Add version query paramter to circumvent any caching
-          v: Date.now().toString()
-        }
-      });
-      const decryptionKey = extractKey(scriptJs);
-      if (!decryptionKey)
-        throw new Error("Key extraction failed");
-      let extractedKey = "";
-      let strippedSources = streamRes.sources;
-      let totalledOffset = 0;
-      decryptionKey.forEach(([a, b]) => {
-        const start = a + totalledOffset;
-        const end = start + b;
-        extractedKey += streamRes.sources.slice(start, end);
-        strippedSources = strippedSources.replace(streamRes.sources.substring(start, end), "");
-        totalledOffset += b;
-      });
-      const decryptedStream = AES.decrypt(strippedSources, extractedKey).toString(enc.Utf8);
-      const parsedStream = JSON.parse(decryptedStream)[0];
-      if (!parsedStream)
-        throw new Error("No stream found");
-      sources = parsedStream;
+      const decryptionKeyString = await ctx.proxiedFetcher(
+        `https://raw.githubusercontent.com/eatmynerds/key/e4/key.txt`,
+      );
+      const decryptionKey = btoa(
+        String.fromCharCode.apply(null, Array.from(new Uint8Array(JSON.parse(decryptionKeyString)))),
+      );
+      if (!decryptionKey) throw new Error('Key extraction failed');
+      const decryptedStream = AES.decrypt(streamRes.sources, decryptionKey).toString(enc.Utf8);
+      sources = isJSON(decryptedStream) ? JSON.parse(decryptedStream)[0] : streamRes.sources[0];
     }
     if (!sources)
       throw new Error("upcloud source not found");
@@ -1930,7 +1884,7 @@ const upcloudScraper = makeEmbed({
   }
 });
 const packedRegex = /(eval\(function\(p,a,c,k,e,d\).*\)\)\))/;
-const linkRegex$1 = /sources:\[{file:"(.*?)"/;
+const linkRegex = /sources:\[{file:"(.*?)"/;
 const upstreamScraper = makeEmbed({
   id: "upstream",
   name: "UpStream",
@@ -1940,15 +1894,15 @@ const upstreamScraper = makeEmbed({
     const packed = streamRes.match(packedRegex);
     if (packed) {
       const unpacked = unpacker.unpack(packed[1]);
-      const link = unpacked.match(linkRegex$1);
+      const link = unpacked.match(linkRegex);
       if (link) {
         return {
           stream: [
             {
               id: "primary",
               type: "hls",
-              playlist: link[1].startsWith("http") ? link[1] : `https://s30.upstreamcdn.co${link[1]}`,
-              flags: [],
+              playlist: link[1],
+              flags: [flags.CORS_ALLOWED],
               captions: []
             }
           ]
@@ -2004,30 +1958,6 @@ const vidsrcembedScraper = makeEmbed({
           type: "hls",
           playlist: finalUrl,
           flags: [flags.CORS_ALLOWED],
-          captions: []
-        }
-      ]
-    };
-  }
-});
-const linkRegex = /'hls': ?'(http.*?)',/;
-const voeScraper = makeEmbed({
-  id: "voe",
-  name: "voe.sx",
-  rank: 180,
-  async scrape(ctx) {
-    const embed = await ctx.proxiedFetcher(ctx.url);
-    const playerSrc = embed.match(linkRegex) ?? [];
-    const streamUrl = playerSrc[1];
-    if (!streamUrl)
-      throw new Error("Stream url not found in embed code");
-    return {
-      stream: [
-        {
-          id: "primary",
-          type: "hls",
-          playlist: streamUrl,
-          flags: [],
           captions: []
         }
       ]
@@ -2165,6 +2095,7 @@ const flixhqScraper = makeSourcerer({
   id: "flixhq",
   name: "FlixHQ",
   rank: 100,
+  disabled: true,
   flags: [flags.CORS_ALLOWED],
   async scrapeMovie(ctx) {
     const id = await getFlixhqId(ctx, ctx.media);
@@ -2233,6 +2164,7 @@ const goMoviesScraper = makeSourcerer({
   id: "gomovies",
   name: "GOmovies",
   rank: 110,
+  disabled: true,
   flags: [flags.CORS_ALLOWED],
   async scrapeShow(ctx) {
     var _a;
@@ -2307,23 +2239,23 @@ const goMoviesScraper = makeSourcerer({
   },
   async scrapeMovie(ctx) {
     var _a;
-    const search2 = await ctx.proxiedFetcher(`ajax/search`, {
-      method: "POST",
-      body: new URLSearchParams({ keyword: ctx.media.title }),
+    const search2 = await ctx.proxiedFetcher(`/search/${ctx.media.title.replace(' ', '-')}`, {
+      method: "GET",
       headers: {
         "X-Requested-With": "XMLHttpRequest"
       },
       baseUrl: gomoviesBase
     });
     const searchPage = load(search2);
-    const mediaElements = searchPage("a.nav-item");
+    const mediaElements = searchPage("div.film-detail");
     const mediaData = mediaElements.toArray().map((movieEl) => {
       var _a2, _b;
-      const name = (_a2 = searchPage(movieEl).find("h3.film-name")) == null ? void 0 : _a2.text();
-      const year = (_b = searchPage(movieEl).find("div.film-infor span:first-of-type")) == null ? void 0 : _b.text();
-      const path = searchPage(movieEl).attr("href");
+      const name = (_a2 = searchPage(movieEl).find("h2.film-name a")) == null ? void 0 : _a2.text();
+      const year = (_b = searchPage(movieEl).find("span.fdi-item:first")) == null ? void 0 : _b.text();
+      const path = searchPage(movieEl).find("h2.film-name a").attr("href");
       return { name, year, path };
     });
+
     const targetMedia = mediaData.find(
       (m) => m.name === ctx.media.title && m.year === ctx.media.releaseYear.toString()
     );
@@ -2403,7 +2335,7 @@ function getEpisodes(dramaPage) {
     return { number, url };
   }).filter((e) => !!e.url);
 }
-async function search$1(ctx, title, seasonNumber) {
+async function search(ctx, title, seasonNumber) {
   const searchForm = new FormData();
   searchForm.append("keyword", `${title} ${seasonNumber ?? ""}`.trim());
   searchForm.append("type", "Drama");
@@ -2429,7 +2361,7 @@ const kissAsianScraper = makeSourcerer({
   async scrapeShow(ctx) {
     const seasonNumber = ctx.media.season.number;
     const episodeNumber = ctx.media.episode.number;
-    const dramas = await search$1(ctx, ctx.media.title, seasonNumber);
+    const dramas = await search(ctx, ctx.media.title, seasonNumber);
     const targetDrama = dramas.find((d) => {
       var _a;
       return ((_a = d.name) == null ? void 0 : _a.toLowerCase()) === ctx.media.title.toLowerCase();
@@ -2452,7 +2384,7 @@ const kissAsianScraper = makeSourcerer({
     };
   },
   async scrapeMovie(ctx) {
-    const dramas = await search$1(ctx, ctx.media.title, void 0);
+    const dramas = await search(ctx, ctx.media.title, void 0);
     const targetDrama = dramas.find((d) => {
       var _a;
       return ((_a = d.name) == null ? void 0 : _a.toLowerCase()) === ctx.media.title.toLowerCase();
@@ -2491,23 +2423,7 @@ async function getVideoSources(ctx, id, media) {
 async function getVideo(ctx, id, media) {
   const data2 = await getVideoSources(ctx, id, media);
   const videoSources = data2.streams;
-  const opts = [
-    "auto",
-    "4K",
-    "4k",
-    "1080p",
-    "1080",
-    "720p",
-    "720",
-    "480p",
-    "480",
-    "240p",
-    "240",
-    "360p",
-    "360",
-    "144",
-    "144p"
-  ];
+  const opts = ["auto", "1080p", "1080", "720p", "720", "480p", "480", "240p", "240", "360p", "360", "144", "144p"];
   let videoUrl = null;
   for (const res of opts) {
     if (videoSources[res] && !videoUrl) {
@@ -2575,7 +2491,7 @@ async function scrape(ctx, media, result) {
   const video = await getVideo(ctx, id, media);
   return video;
 }
-async function universalScraper$6(ctx) {
+async function universalScraper$5(ctx) {
   const lookmovieData = await searchAndFindMedia$1(ctx, ctx.media);
   if (!lookmovieData)
     throw new NotFoundError("Media not found");
@@ -2603,102 +2519,8 @@ const lookmovieScraper = makeSourcerer({
   disabled: true,
   rank: 700,
   flags: [flags.IP_LOCKED],
-  scrapeShow: universalScraper$6,
-  scrapeMovie: universalScraper$6
-});
-const primewireBase = "https://www.primewire.tf";
-const primewireApiKey = atob("bHpRUHNYU0tjRw==");
-async function getLinks(input) {
-  const { getLinks: getLinkFunc } = await import("./blowfish-ae0fe824.mjs");
-  return getLinkFunc(input);
-}
-async function search(ctx, imdbId) {
-  const searchResult = await ctx.proxiedFetcher("/api/v1/show/", {
-    baseUrl: primewireBase,
-    query: {
-      key: primewireApiKey,
-      imdb_id: imdbId
-    }
-  });
-  return searchResult.id;
-}
-async function getStreams(title) {
-  const titlePage = load(title);
-  const userData = titlePage("#user-data").attr("v");
-  if (!userData)
-    throw new NotFoundError("No user data found");
-  const links = await getLinks(userData);
-  const embeds = [];
-  for (const link in links) {
-    if (link.includes(link)) {
-      const element = titlePage(`.propper-link[link_version='${link}']`);
-      const sourceName = element.parent().parent().parent().find(".version-host").text().trim();
-      let embedId;
-      switch (sourceName) {
-        case "mixdrop.co":
-          embedId = "mixdrop";
-          break;
-        case "voe.sx":
-          embedId = "voe";
-          break;
-        case "upstream.to":
-          embedId = "upstream";
-          break;
-        case "streamvid.net":
-          embedId = "streamvid";
-          break;
-        default:
-          embedId = null;
-      }
-      if (!embedId)
-        continue;
-      embeds.push({
-        url: `https://www.primewire.tf/links/go/${links[link]}`,
-        embedId
-      });
-    }
-  }
-  return embeds;
-}
-const primewireScraper = makeSourcerer({
-  id: "primewire",
-  name: "Primewire",
-  rank: 250,
-  flags: [],
-  async scrapeMovie(ctx) {
-    if (!ctx.media.imdbId)
-      throw new Error("No imdbId provided");
-    const searchResult = await search(ctx, ctx.media.imdbId);
-    const title = await ctx.fetcher(`movie/${searchResult}`, {
-      baseUrl: primewireBase
-    });
-    const embeds = await getStreams(title);
-    return {
-      embeds
-    };
-  },
-  async scrapeShow(ctx) {
-    var _a;
-    if (!ctx.media.imdbId)
-      throw new Error("No imdbId provided");
-    const searchResult = await search(ctx, ctx.media.imdbId);
-    const season = await ctx.fetcher(`tv/${searchResult}`, {
-      baseUrl: primewireBase
-    });
-    const seasonPage = load(season);
-    const episodeLink = (_a = seasonPage(`.show_season[data-id='${ctx.media.season.number}'] > div > a`).toArray().find((link) => {
-      return link.attribs.href.includes(`-episode-${ctx.media.episode.number}`);
-    })) == null ? void 0 : _a.attribs.href;
-    if (!episodeLink)
-      throw new NotFoundError("No episode links found");
-    const title = await ctx.fetcher(episodeLink, {
-      baseUrl: primewireBase
-    });
-    const embeds = await getStreams(title);
-    return {
-      embeds
-    };
-  }
+  scrapeShow: universalScraper$5,
+  scrapeMovie: universalScraper$5
 });
 const remotestreamBase = atob("aHR0cHM6Ly9mc2IuOG1ldDNkdGpmcmNxY2hjb25xcGtsd3hzeGIyb2N1bWMuc3RyZWFt");
 const origin = "https://remotestre.am";
@@ -2706,6 +2528,7 @@ const referer$5 = "https://remotestre.am/";
 const remotestreamScraper = makeSourcerer({
   id: "remotestream",
   name: "Remote Stream",
+  disabled: true,
   rank: 55,
   flags: [flags.CORS_ALLOWED],
   async scrapeShow(ctx) {
@@ -2907,7 +2730,7 @@ async function scrapeShow$1(ctx) {
 const vidsrcScraper = makeSourcerer({
   id: "vidsrc",
   name: "VidSrc",
-  rank: 120,
+  rank: 350,
   flags: [flags.CORS_ALLOWED],
   scrapeMovie: scrapeMovie$1,
   scrapeShow: scrapeShow$1
@@ -3133,6 +2956,7 @@ const zoechipScraper = makeSourcerer({
   id: "zoechip",
   name: "ZoeChip",
   rank: 200,
+  disabled: true,
   flags: [flags.CORS_ALLOWED],
   scrapeMovie,
   scrapeShow
@@ -3557,6 +3381,7 @@ const wootlyScraper = makeEmbed({
       method: "POST",
       body: new URLSearchParams({ qdf: "1" }),
       headers: {
+        "content-type": "application/x-www-form-urlencoded",
         cookie: makeCookieHeader({ wooz: woozCookie }),
         Referer: iframeSrc
       }
@@ -3587,7 +3412,7 @@ const wootlyScraper = makeEmbed({
           qualities: {
             unknown: {
               type: "mp4",
-              url
+              url: `https://railwayproxy-production.up.railway.app/?destination=${encodeURIComponent(url)}`
             }
           }
         }
@@ -3598,7 +3423,7 @@ const wootlyScraper = makeEmbed({
 const baseUrl = "https://www.goojara.to";
 const baseUrl2 = "https://ww1.goojara.to";
 async function getEmbeds(ctx, id) {
-  const data2 = await ctx.fetcher.full(`/${id}`, {
+  const data2 = await ctx.proxiedFetcher.full(`/${id}`, {
     baseUrl: baseUrl2,
     headers: {
       Referer: baseUrl,
@@ -3623,7 +3448,7 @@ async function getEmbeds(ctx, id) {
   const embedRedirectURLs = $("a").map((index, element) => $(element).attr("href")).get().filter((href) => href && href.includes(`${baseUrl2}/go.php`));
   const embedPages = await Promise.all(
     embedRedirectURLs.map(
-      (url) => ctx.fetcher.full(url, {
+      (url) => ctx.proxiedFetcher.full(url, {
         headers: {
           cookie: cookie2,
           Referer: baseUrl2
@@ -3646,11 +3471,13 @@ async function getEmbeds(ctx, id) {
 }
 let data;
 const headersData = {
-  cookie: `aGooz=t9pmkdtef1b3lg3pmo1u2re816; bd9aa48e=0d7b89e8c79844e9df07a2; _b414=2151C6B12E2A88379AFF2C0DD65AC8298DEC2BF4; 9d287aaa=8f32ad589e1c4288fe152f`,
-  Referer: "https://www.goojara.to/"
+  "content-type": "application/x-www-form-urlencoded",
+  "cookie": "aGooz=vtnau5fgvdjpr5v8186suabhu5; 52228e86=9107839784b0af77cdb6cf",
+  "Referer": "https://www.goojara.to/",
+  "Referrer-Policy": "strict-origin-when-cross-origin"
 };
 async function searchAndFindMedia(ctx, media) {
-  data = await ctx.fetcher(`/xhrr.php`, {
+  data = await ctx.proxiedFetcher(`/xhrr.php`, {
     baseUrl,
     headers: headersData,
     method: "POST",
@@ -3680,7 +3507,7 @@ async function scrapeIds(ctx, media, result) {
   if (media.type === "movie") {
     id = result.slug;
   } else if (media.type === "show") {
-    data = await ctx.fetcher(`/${result.slug}`, {
+    data = await ctx.proxiedFetcher(`/${result.slug}`, {
       baseUrl,
       headers: headersData,
       method: "GET",
@@ -3706,7 +3533,7 @@ async function scrapeIds(ctx, media, result) {
   const embeds = await getEmbeds(ctx, id);
   return embeds;
 }
-async function universalScraper$5(ctx) {
+async function universalScraper$4(ctx) {
   const goojaraData = await searchAndFindMedia(ctx, ctx.media);
   if (!goojaraData)
     throw new NotFoundError("Media not found");
@@ -3722,178 +3549,8 @@ async function universalScraper$5(ctx) {
 const goojaraScraper = makeSourcerer({
   id: "goojara",
   name: "Goojara",
-  rank: 225,
+  rank: 330,
   flags: [],
-  scrapeShow: universalScraper$5,
-  scrapeMovie: universalScraper$5
-});
-function getValidQualityFromString(quality) {
-  switch (quality.toLowerCase().replace("p", "")) {
-    case "360":
-      return "360";
-    case "480":
-      return "480";
-    case "720":
-      return "720";
-    case "1080":
-      return "1080";
-    case "2160":
-      return "4k";
-    case "4k":
-      return "4k";
-    default:
-      return "unknown";
-  }
-}
-function generateRandomFavs() {
-  const randomHex = () => Math.floor(Math.random() * 16).toString(16);
-  const generateSegment = (length) => Array.from({ length }, randomHex).join("");
-  return `${generateSegment(8)}-${generateSegment(4)}-${generateSegment(4)}-${generateSegment(4)}-${generateSegment(
-    12
-  )}`;
-}
-function parseSubtitleLinks(inputString) {
-  if (!inputString || typeof inputString === "boolean")
-    return [];
-  const linksArray = inputString.split(",");
-  const captions = [];
-  linksArray.forEach((link) => {
-    const match = link.match(/\[([^\]]+)\](https?:\/\/\S+?)(?=,\[|$)/);
-    if (match) {
-      const type = getCaptionTypeFromUrl(match[2]);
-      const language = labelToLanguageCode(match[1]);
-      if (!type || !language)
-        return;
-      captions.push({
-        id: match[2],
-        language,
-        hasCorsRestrictions: false,
-        type,
-        url: match[2]
-      });
-    }
-  });
-  return captions;
-}
-function parseVideoLinks(inputString) {
-  if (!inputString)
-    throw new NotFoundError("No video links found");
-  const linksArray = inputString.split(",");
-  const result = {};
-  linksArray.forEach((link) => {
-    const match = link.match(/\[([^]+)](https?:\/\/[^\s,]+\.mp4)/);
-    if (match) {
-      const qualityText = match[1];
-      const mp4Url = match[2];
-      const numericQualityMatch = qualityText.match(/(\d+p)/);
-      const quality = numericQualityMatch ? numericQualityMatch[1] : "Unknown";
-      console.log(quality, mp4Url);
-      const validQuality = getValidQualityFromString(quality);
-      result[validQuality] = { type: "mp4", url: mp4Url };
-    }
-  });
-  return result;
-}
-function extractTitleAndYear(input) {
-  const regex = /^(.*?),.*?(\d{4})/;
-  const match = input.match(regex);
-  if (match) {
-    const title = match[1];
-    const year = match[2];
-    return { title: title.trim(), year: year ? parseInt(year, 10) : null };
-  }
-  return null;
-}
-const rezkaBase = "https://hdrzk.org";
-const baseHeaders = {
-  "X-Hdrezka-Android-App": "1",
-  "X-Hdrezka-Android-App-Version": "2.2.0"
-};
-async function searchAndFindMediaId(ctx) {
-  var _a;
-  const itemRegexPattern = /<a href="([^"]+)"><span class="enty">([^<]+)<\/span> \(([^)]+)\)/g;
-  const idRegexPattern = /\/(\d+)-[^/]+\.html$/;
-  const searchData = await ctx.proxiedFetcher(`/engine/ajax/search.php`, {
-    baseUrl: rezkaBase,
-    headers: baseHeaders,
-    query: { q: ctx.media.title }
-  });
-  const movieData = [];
-  for (const match of searchData.matchAll(itemRegexPattern)) {
-    const url = match[1];
-    const titleAndYear = match[3];
-    const result = extractTitleAndYear(titleAndYear);
-    if (result !== null) {
-      const id = ((_a = url.match(idRegexPattern)) == null ? void 0 : _a[1]) || null;
-      movieData.push({ id: id ?? "", year: result.year ?? 0, type: ctx.media.type, url });
-    }
-  }
-  const filteredItems = movieData.filter((item) => item.type === ctx.media.type && item.year === ctx.media.releaseYear);
-  return filteredItems[0] || null;
-}
-async function getStream(id, translatorId, ctx) {
-  const searchParams = new URLSearchParams();
-  searchParams.append("id", id);
-  searchParams.append("translator_id", translatorId);
-  if (ctx.media.type === "show") {
-    searchParams.append("season", ctx.media.season.number.toString());
-    searchParams.append("episode", ctx.media.episode.number.toString());
-  }
-  if (ctx.media.type === "movie") {
-    searchParams.append("is_camprip", "0");
-    searchParams.append("is_ads", "0");
-    searchParams.append("is_director", "0");
-  }
-  searchParams.append("favs", generateRandomFavs());
-  searchParams.append("action", ctx.media.type === "show" ? "get_stream" : "get_movie");
-  const response = await ctx.proxiedFetcher("/ajax/get_cdn_series/", {
-    baseUrl: rezkaBase,
-    method: "POST",
-    body: searchParams,
-    headers: baseHeaders
-  });
-  return JSON.parse(response);
-}
-async function getTranslatorId(url, id, ctx) {
-  const response = await ctx.proxiedFetcher(url, {
-    headers: baseHeaders
-  });
-  if (response.includes(`data-translator_id="238"`))
-    return "238";
-  const functionName = ctx.media.type === "movie" ? "initCDNMoviesEvents" : "initCDNSeriesEvents";
-  const regexPattern = new RegExp(`sof\\.tv\\.${functionName}\\(${id}, ([^,]+)`, "i");
-  const match = response.match(regexPattern);
-  const translatorId = match ? match[1] : null;
-  return translatorId;
-}
-const universalScraper$4 = async (ctx) => {
-  const result = await searchAndFindMediaId(ctx);
-  if (!result || !result.id)
-    throw new NotFoundError("No result found");
-  const translatorId = await getTranslatorId(result.url, result.id, ctx);
-  if (!translatorId)
-    throw new NotFoundError("No translator id found");
-  const { url: streamUrl, subtitle: streamSubtitle } = await getStream(result.id, translatorId, ctx);
-  const parsedVideos = parseVideoLinks(streamUrl);
-  const parsedSubtitles = parseSubtitleLinks(streamSubtitle);
-  return {
-    embeds: [],
-    stream: [
-      {
-        id: "primary",
-        type: "file",
-        flags: [flags.CORS_ALLOWED, flags.IP_LOCKED],
-        captions: parsedSubtitles,
-        qualities: parsedVideos
-      }
-    ]
-  };
-};
-const hdRezkaScraper = makeSourcerer({
-  id: "hdrezka",
-  name: "HDRezka",
-  rank: 195,
-  flags: [flags.CORS_ALLOWED, flags.IP_LOCKED],
   scrapeShow: universalScraper$4,
   scrapeMovie: universalScraper$4
 });
@@ -3958,6 +3615,7 @@ const nepuScraper = makeSourcerer({
   id: "nepu",
   name: "Nepu",
   rank: 111,
+  disabled: true,
   flags: [],
   scrapeMovie: universalScraper$3,
   scrapeShow: universalScraper$3
@@ -4018,7 +3676,8 @@ const universalScraper$2 = async (ctx) => {
 const ridooMoviesScraper = makeSourcerer({
   id: "ridomovies",
   name: "RidoMovies",
-  rank: 105,
+  rank: 30,
+  disabled: true,
   flags: [flags.CORS_ALLOWED],
   scrapeMovie: universalScraper$2,
   scrapeShow: universalScraper$2
@@ -4066,6 +3725,7 @@ const smashyStreamScraper = makeSourcerer({
   id: "smashystream",
   name: "SmashyStream",
   rank: 70,
+  disabled: true,
   flags: [flags.CORS_ALLOWED],
   scrapeMovie: universalScraper$1,
   scrapeShow: universalScraper$1
@@ -4074,7 +3734,8 @@ const vidSrcToBase = "https://vidsrc.to";
 const referer = `${vidSrcToBase}/`;
 const universalScraper = async (ctx) => {
   const imdbId = ctx.media.imdbId;
-  const url = ctx.media.type === "movie" ? `/embed/movie/${imdbId}` : `/embed/tv/${imdbId}/${ctx.media.season.number}/${ctx.media.episode.number}`;
+  const tmdbId = ctx.media.tmdbId;
+  const url = ctx.media.type === "movie" ? `/embed/movie/${imdbId || tmdbId}` : `/embed/tv/${imdbId || tmdbId}/${ctx.media.season.number}/${ctx.media.episode.number}`;
   const mainPage = await ctx.proxiedFetcher(url, {
     baseUrl: vidSrcToBase,
     headers: {
@@ -4142,25 +3803,23 @@ const vidSrcToScraper = makeSourcerer({
   scrapeMovie: universalScraper,
   scrapeShow: universalScraper,
   flags: [],
-  rank: 300
+  rank: 250
 });
 function gatherAllSources() {
   return [
-    flixhqScraper,
-    remotestreamScraper,
+    flixhqScraper,//
+    remotestreamScraper,//
     kissAsianScraper,
     showboxScraper,
-    goMoviesScraper,
-    zoechipScraper,
+    goMoviesScraper,//
+    zoechipScraper,//
     vidsrcScraper,
     lookmovieScraper,
-    smashyStreamScraper,
-    ridooMoviesScraper,
+    smashyStreamScraper,//
+    ridooMoviesScraper,//
     vidSrcToScraper,
-    nepuScraper,
-    goojaraScraper,
-    hdRezkaScraper,
-    primewireScraper
+    nepuScraper,//
+    goojaraScraper
   ];
 }
 function gatherAllEmbeds() {
@@ -4182,9 +3841,7 @@ function gatherAllEmbeds() {
     fileMoonScraper,
     vidplayScraper,
     wootlyScraper,
-    doodScraper,
-    streamvidScraper,
-    voeScraper
+    doodScraper
   ];
 }
 function getBuiltinSources() {
